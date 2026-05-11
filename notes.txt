@@ -1,0 +1,44 @@
+começar por:
+- chamar a função original e guardar localmente o resultado
+- volta a chamar de novo a função original (execução 2 vezes)
+- comparar resultados (redundancia)
+- se for igual perfeito, se nao chamar uma 3 vez e ver com qual dos 2 corresponde
+- os dois iguais provavelmente foram os corretos
+
+isto pode ainda não estar certo mas já é um pouco mais tolerante
+
+para o teste correr o software q vai dar um resultado para cada falha diferente e dizer para o original tive X% de falhas destas Y% daquelas etc e para o novo codigo tmb
+
+
+
+watchdoctimer para ver se a função n se lixou a meio ao fim de X tempo
+
+
+
+
+problema disto é executar o dobro ou mais das vezes q pode fazer os satelites gastarem o dobro ou mais de energia
+ver outras formas q consigam n fazer tanto disso e se é tão bom o melhor do q a redundancia
+
+
+
+resultado importante:
+silent data corruption - corre e o resultado é incorreto embora correr bem (convem chegar a 0 nesta)
+
+
+no relatorio talvez mostrar uma tabela dos resultados q obtemos
+
+
+
+
+para escolher o FR depende da tecnica, nesta de redundancia tanto faz mas pensar noutras
+
+
+uma tecnica q ha é algorithgm based fault tolerance:
+ABDT
+- quase uma prova dos noes (checksum da matriz)
+especie de prova dos 9 para confirmar se o resultado q estou a ter esta correto
+esta tecnica só funciona bem para matrizes por exemplo
+ou seja, ver as tecnicas q formos usar e pensar nisso!
+
+
+reesecuo sequencial ou em paralelo (2 threads) mas preferencialmente olhar so para o sequencial!
