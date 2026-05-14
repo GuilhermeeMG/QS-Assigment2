@@ -3,6 +3,7 @@ from fr2_checksum import checksum
 
 REPS = 1_000_000
 
+# Timing Redundancy
 
 def ft_redundance(func: callable, *args, max_seconds: float | None = None, **kwargs):
     # First two calls to check for consistency.
@@ -32,5 +33,6 @@ def checksum_ft(payload, n: int, received_checksum: int) -> bool:
 
 if __name__ == "__main__":
     for i in range(REPS):
-        schedule_tasks_ft([(1, 0, 10, 50), (2, 2, 5, 50), (3, 3, 3, 50)], 0)
+        result = schedule_tasks_ft([(1, 0, 10, 50), (2, 2, 5, 50), (3, 3, 3, 50)], 0)
+        print(result, flush=True)
         #checksum_ft(bytes([i % 256 for i in range(10)]), 10, 0)
