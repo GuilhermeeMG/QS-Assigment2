@@ -24,10 +24,14 @@ def _worker_loop(task_queue: mp.Queue, result_queue: mp.Queue) -> None:
             return
 
         task_id, func, args, kwargs = task
+        start = time.perf_counter()
         try:
-            result_queue.put((task_id, "ok", func(*args, **kwargs)))
+            result = func(*args, **kwargs)
+            duration = time.perf_counter() - start
+            result_queue.put((task_id, "ok", result, duration))
         except Exception as exc:
-            result_queue.put((task_id, "err", exc))
+            duration = time.perf_counter() - start
+            result_queue.put((task_id, "err", exc, duration))
 
 
 class _WatchdogWorker:
@@ -42,28 +46,30 @@ class _WatchdogWorker:
         self._process.start()
         self._next_task_id = 1
 
-    def run(self, func: callable, args: tuple, kwargs: dict, max_seconds: float | None):
+    def submit(self, func: callable, args: tuple, kwargs: dict) -> int:
         task_id = self._next_task_id
         self._next_task_id += 1
         self._task_queue.put((task_id, func, args, kwargs))
+        return task_id
 
+    def get_result(self, task_id: int, max_seconds: float | None):
         try:
             if max_seconds is None:
-                result_id, status, payload = self._result_queue.get()
+                result_id, status, payload, duration = self._result_queue.get()
             else:
-                result_id, status, payload = self._result_queue.get(timeout=max_seconds)
+                result_id, status, payload, duration = self._result_queue.get(timeout=max_seconds)
         except queue.Empty:
             self._restart()
-            return None, True
+            return None, True, None
 
         if result_id != task_id:
             self._restart()
-            return None, True
+            return None, True, None
 
         if status == "err":
             raise payload
 
-        return payload, False
+        return payload, False, duration
 
     def _restart(self) -> None:
         if self._process.is_alive():
@@ -77,6 +83,7 @@ class _WatchdogWorker:
             args=(self._task_queue, self._result_queue),
         )
         self._process.start()
+        self._next_task_id = 1
 
     def close(self) -> None:
         if self._process.is_alive():
@@ -97,25 +104,72 @@ class _WatchdogWorker:
         self._result_queue.join_thread()
 
 
-_WATCHDOG_WORKER = None
-_WATCHDOG_WORKER_REGISTERED = False
+class _WatchdogPool:
+    _workers: list[_WatchdogWorker]
+    _len_workers: int
+    _next_worker: int
+
+    def __init__(self, size: int = 2) -> None:
+        self._workers = [_WatchdogWorker() for _ in range(size)]
+        self._len_workers = size
+        self._next_worker = 0
+
+    def run_single(
+        self, func: callable, args: tuple, kwargs: dict, max_seconds: float | None
+    ) -> tuple:
+        worker = self._workers[self._next_worker]
+        self._next_worker = (self._next_worker + 1) % self._len_workers
+
+        task_id = worker.submit(func, args, kwargs)
+        start = time.perf_counter()
+        payload, timed_out, duration = worker.get_result(task_id, max_seconds)
+        if duration is None:
+            duration = time.perf_counter() - start
+        return payload, duration, timed_out
+
+    def run_pair(
+        self, func: callable, args: tuple, kwargs: dict, max_seconds: float
+    ) -> list[tuple]:
+        tasks = []
+        start = time.perf_counter()
+        for worker in self._workers:
+            task_id = worker.submit(func, args, kwargs)
+            tasks.append((worker, task_id))
+
+        deadline = start + max_seconds
+        results = []
+        for worker, task_id in tasks:
+            remaining = max(0.0, deadline - time.perf_counter())
+            payload, timed_out, duration = worker.get_result(task_id, remaining)
+            if duration is None:
+                duration = time.perf_counter() - start
+            results.append((payload, duration, timed_out))
+        return results
+
+    def close(self) -> None:
+        for worker in self._workers:
+            worker.close()
 
 
-def _get_worker() -> _WatchdogWorker:
-    global _WATCHDOG_WORKER, _WATCHDOG_WORKER_REGISTERED
-    if _WATCHDOG_WORKER is None:
-        _WATCHDOG_WORKER = _WatchdogWorker()
-        if not _WATCHDOG_WORKER_REGISTERED:
-            atexit.register(_shutdown_worker)
-            _WATCHDOG_WORKER_REGISTERED = True
-    return _WATCHDOG_WORKER
+_WATCHDOG_POOL = None
+_WATCHDOG_POOL_REGISTERED = False
 
 
-def _shutdown_worker() -> None:
-    global _WATCHDOG_WORKER
-    if _WATCHDOG_WORKER is not None:
-        _WATCHDOG_WORKER.close()
-        _WATCHDOG_WORKER = None
+def _get_pool() -> _WatchdogPool:
+    global _WATCHDOG_POOL, _WATCHDOG_POOL_REGISTERED
+    if _WATCHDOG_POOL is None:
+        _WATCHDOG_POOL = _WatchdogPool(size=2)
+        if not _WATCHDOG_POOL_REGISTERED:
+            atexit.register(_shutdown_pool)
+            _WATCHDOG_POOL_REGISTERED = True
+    return _WATCHDOG_POOL
+
+
+def _shutdown_pool() -> None:
+    global _WATCHDOG_POOL
+    if _WATCHDOG_POOL is not None:
+        _WATCHDOG_POOL.close()
+        _WATCHDOG_POOL = None
 
 
 def _timed_call(func: callable, args: tuple, kwargs: dict, max_seconds: float | None) -> tuple:
@@ -129,10 +183,24 @@ def _timed_call(func: callable, args: tuple, kwargs: dict, max_seconds: float | 
         duration = time.perf_counter() - start
         return result, duration, False
 
-    start = time.perf_counter()
-    result, timed_out = _get_worker().run(func, args, kwargs, max_seconds)
-    duration = time.perf_counter() - start
-    return result, duration, timed_out
+    return _get_pool().run_single(func, args, kwargs, max_seconds)
+
+
+def _timed_call_pair(func: callable, args: tuple, kwargs: dict, max_seconds: float | None) -> tuple:
+    """Call the given function twice and measure each duration."""
+    if max_seconds is None:
+        start = time.perf_counter()
+        result1 = func(*args, **kwargs)
+        duration1 = time.perf_counter() - start
+
+        start = time.perf_counter()
+        result2 = func(*args, **kwargs)
+        duration2 = time.perf_counter() - start
+
+        return (result1, duration1, False), (result2, duration2, False)
+
+    results = _get_pool().run_pair(func, args, kwargs, max_seconds)
+    return results[0], results[1]
 
 
 def _report_watchdog_issues(
@@ -152,12 +220,13 @@ def ft_redundance(func: callable, *args, max_seconds: float | None = None, **kwa
     issues = []
     timings = []
 
-    # First two calls to check for consistency and timing.
-    result1, t1, timed_out1 = _timed_call(func, args, kwargs, max_seconds=max_seconds)
+    # First two calls in parallel to check for consistency and timing.
+    (result1, t1, timed_out1), (result2, t2, timed_out2) = _timed_call_pair(
+        func, args, kwargs, max_seconds=max_seconds
+    )
     timings.append(t1)
     if timed_out1:
         issues.append("call1_timeout")
-    result2, t2, timed_out2 = _timed_call(func, args, kwargs, max_seconds=max_seconds)
     timings.append(t2)
     if timed_out2:
         issues.append("call2_timeout")
@@ -242,4 +311,3 @@ if __name__ == "__main__":
         execute_testing_timing()
     else:
         execute_testing()
-        
