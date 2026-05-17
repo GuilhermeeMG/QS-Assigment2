@@ -3,6 +3,7 @@ import multiprocessing as mp
 import queue
 import sys
 import time
+from typing import List, Tuple
 
 REPS = 1_000_000
 
@@ -12,6 +13,7 @@ CHECKSUM_MAX_SECONDS = 0.08
 TESTING_TIMING = False
 TESTING_REPS = 40
 TESTING_WARMUP_REPS = 10
+
 
 def normalize_task(task):
     """Return a validated task tuple or None if the task is invalid
@@ -25,7 +27,9 @@ def normalize_task(task):
     else:
         return None
 
-    if not all(isinstance(x, int) for x in (task_id, start_time, duration, priority)): # all integers
+    if not all(
+        isinstance(x, int) for x in (task_id, start_time, duration, priority)
+    ):  # all integers
         return None
 
     if duration <= 0:
@@ -49,7 +53,7 @@ def pick_best_ready(ready):
     idx = 1
     while idx < len(ready):
         cand = ready[idx]
-        #[task_id, start_time, priority, remaining, order]
+        # [task_id, start_time, priority, remaining, order]
         if cand[2] > best[2]:
             best_idx = idx
             best = cand
@@ -75,7 +79,7 @@ def schedule_tasks(tasks, current_time):
         return []
 
     normalized_tasks = []
-    #(task_id, start_time, priority, remaining, order)
+    # (task_id, start_time, priority, remaining, order)
 
     for order, raw_task in enumerate(tasks):
         task = normalize_task(raw_task)
@@ -165,17 +169,18 @@ def checksum(payload, n: int, received_checksum: int) -> bool:
     # Validating payload type.
     if not isinstance(payload, (bytes, bytearray)):
         return False
-    
+
     # Validating payload length.
     if len(payload) != n:
         return False
-    
+
     # Computing the checksum.
     computed = 0
     for b in payload:
         computed ^= b
-        
+
     return computed == received_checksum
+
 
 def _worker_loop(task_queue: mp.Queue, result_queue: mp.Queue) -> None:
     while True:
@@ -212,7 +217,7 @@ class _WatchdogWorker:
         self._task_queue.put((task_id, func, args, kwargs))
         return task_id
 
-    def get_result(self, task_id: int, max_seconds: float | None):
+    def get_result(self, task_id: int, max_seconds: float):
         try:
             if max_seconds is None:
                 result_id, status, payload, duration = self._result_queue.get()
@@ -265,7 +270,7 @@ class _WatchdogWorker:
 
 
 class _WatchdogPool:
-    _workers: list[_WatchdogWorker]
+    _workers: List["_WatchdogWorker"]
     _len_workers: int
     _next_worker: int
 
@@ -274,9 +279,7 @@ class _WatchdogPool:
         self._len_workers = size
         self._next_worker = 0
 
-    def run_single(
-        self, func: callable, args: tuple, kwargs: dict, max_seconds: float | None
-    ) -> tuple:
+    def run_single(self, func: callable, args: tuple, kwargs: dict, max_seconds: float) -> tuple:
         worker = self._workers[self._next_worker]
         self._next_worker = (self._next_worker + 1) % self._len_workers
 
@@ -289,7 +292,7 @@ class _WatchdogPool:
 
     def run_pair(
         self, func: callable, args: tuple, kwargs: dict, max_seconds: float
-    ) -> list[tuple]:
+    ) -> List[Tuple]:
         tasks = []
         start = time.perf_counter()
         for worker in self._workers:
@@ -332,7 +335,7 @@ def _shutdown_pool() -> None:
         _WATCHDOG_POOL = None
 
 
-def _timed_call(func: callable, args: tuple, kwargs: dict, max_seconds: float | None) -> tuple:
+def _timed_call(func: callable, args: tuple, kwargs: dict, max_seconds: float) -> tuple:
     """
     Call the given function with arguments and measure the time taken.
     If it exceeds max_seconds, return a timeout indication.
@@ -346,7 +349,7 @@ def _timed_call(func: callable, args: tuple, kwargs: dict, max_seconds: float | 
     return _get_pool().run_single(func, args, kwargs, max_seconds)
 
 
-def _timed_call_pair(func: callable, args: tuple, kwargs: dict, max_seconds: float | None) -> tuple:
+def _timed_call_pair(func: callable, args: tuple, kwargs: dict, max_seconds: float) -> tuple:
     """Call the given function twice and measure each duration."""
     if max_seconds is None:
         start = time.perf_counter()
@@ -375,7 +378,7 @@ def _report_watchdog_issues(
     )
 
 
-def ft_redundance(func: callable, *args, max_seconds: float | None = None, **kwargs):
+def ft_redundance(func: callable, *args, max_seconds: float, **kwargs):
     """Calls the given function multiple times to check for consistency and timing, and report any issues detected."""
     issues = []
     timings = []
@@ -453,13 +456,13 @@ def execute_testing_timing(reps):
 
         if i < TESTING_WARMUP_REPS:
             print(
-                f"[{i+1}/{total_testing_reps}] - Time for {reps} iterations (WARMUP): {time.perf_counter() - time1:.2f} seconds",
+                f"[{i + 1}/{total_testing_reps}] - Time for {reps} iterations (WARMUP): {time.perf_counter() - time1:.2f} seconds",
                 flush=True,
             )
         else:
             times.append(time.perf_counter() - time1)
             print(
-                f"[{i+1}/{total_testing_reps}] - Time for {reps} iterations: {time.perf_counter() - time1:.2f} seconds",
+                f"[{i + 1}/{total_testing_reps}] - Time for {reps} iterations: {time.perf_counter() - time1:.2f} seconds",
                 flush=True,
             )
 

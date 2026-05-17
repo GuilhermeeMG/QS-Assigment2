@@ -206,7 +206,7 @@ class _WatchdogWorker:
         self._process.start()
         self._next_task_id = 1
 
-    def run(self, func: callable, args: tuple, kwargs: dict, max_seconds: float | None):
+    def run(self, func: callable, args: tuple, kwargs: dict, max_seconds: float):
         task_id = self._next_task_id
         self._next_task_id += 1
         self._task_queue.put((task_id, func, args, kwargs))
@@ -282,7 +282,7 @@ def _shutdown_worker() -> None:
         _WATCHDOG_WORKER = None
 
 
-def _timed_call(func: callable, args: tuple, kwargs: dict, max_seconds: float | None) -> tuple:
+def _timed_call(func: callable, args: tuple, kwargs: dict, max_seconds: float) -> tuple:
     """
     Call the given function with arguments and measure the time taken.
     If it exceeds max_seconds, return a timeout indication.
@@ -311,7 +311,7 @@ def _report_watchdog_issues(
     )
 
 
-def ft_redundance(func: callable, *args, max_seconds: float | None = None, **kwargs):
+def ft_redundance(func: callable, *args, max_seconds: float, **kwargs):
     """Calls the given function multiple times to check for consistency and timing, and report any issues detected."""
     issues = []
     timings = []
